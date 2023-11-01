@@ -1,10 +1,10 @@
 all: server client
 
 server: server
-	g++ bin/server.cpp -o build/server
+	g++ bin/server.cpp -o build/server -lpthread
 
-client: build
-	g++ bin/client.cpp -o build/client
+client: client
+	g++ bin/client.cpp -o build/client -lpthread
 
 run: all
 	./run_server_client.sh 12345
