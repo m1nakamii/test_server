@@ -1,8 +1,5 @@
 all: server client
 
-build:
-	mkdir -p build
-
 server: server
 	g++ bin/server.cpp -o build/server
 
