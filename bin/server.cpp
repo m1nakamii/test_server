@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
 
         std::cout << "Клиент подключен" << std::endl;
 
-        std::thread clientThread(handleClient, clientSocket);
+        std::thread clientThread(handleClient, clientSocket, clientName);
         clientThread.detach(); // Отделяем поток, чтобы избежать блокировки сервера
 
         std::unique_lock<std::mutex> lock(mtx);
