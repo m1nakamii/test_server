@@ -8,10 +8,12 @@
 #include <mutex>
 #include <condition_variable>
 #include <algorithm>
+#include <string>
 
 struct ClientConnection {
     int socket;
     struct sockaddr_in clientAddr;
+    std::string name;
 };
 
 std::vector<ClientConnection> clients;
@@ -87,13 +89,24 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        std::cout << "Клиент подключен" << std::endl;
+        char nameBuffer[1024];
+        int nameBytesRead = recv(clientSocket, nameBuffer, sizeof(nameBuffer), 0);
+        if (nameBytesRead <= 0) {
+            std::cerr << "Клиент не отправил имя" << std::endl;
+            close(clientSocket);
+            continue;
+        }
+
+        nameBuffer[nameBytesRead] = '\0';
+        std::string clientName(nameBuffer);
+
+        std::cout << "Клиент '" << clientName << "' подключен" << std::endl;
 
         std::thread clientThread(handleClient, clientSocket, clientName);
-        clientThread.detach(); // Отделяем поток, чтобы избежать блокировки сервера
+        clientThread.detach();
 
         std::unique_lock<std::mutex> lock(mtx);
-        clients.push_back({clientSocket, clientAddr});
+        clients.push_back({clientSocket, clientAddr, clientName});
     }
 
     close(serverSocket);
