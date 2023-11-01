@@ -7,25 +7,6 @@
 #include <cerrno>
 #include <thread>
 
-void receiveMessages(int clientSocket) {
-    while (true) {
-        char buffer[1024];
-        ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer), 0);
-
-        if (bytesRead == -1) {
-            std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
-            break;
-        }
-
-        if (bytesRead <= 0) {
-            std::cerr << "Server disconnected." << std::endl;
-            break;
-        }
-
-        std::cout << "Server response: " << std::string(buffer, bytesRead) << std::endl;
-    }
-}
-
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <server_ip> <server_port>" << std::endl;
@@ -54,21 +35,55 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Connected to the server." << std::endl;
 
-    std::thread receiver(receiveMessages, clientSocket);
+    std::string userName;
+    std::cout << "Enter your name: ";
+    std::getline(std::cin, userName);
 
+    ssize_t nameBytesSent = send(clientSocket, userName.c_str(), userName.size(), 0);
+    if (nameBytesSent == -1) {
+        std::cerr << "Error sending name: " << strerror(errno) << std::endl;
+        close(clientSocket);
+        return 1;
+    }
+
+    std::thread receiver([](int socket) {
     while (true) {
-        std::string message;
-        std::cout << "Enter a command: " << std::endl;
-        std::getline(std::cin, message);
+        char buffer[1024];
+        ssize_t bytesRead = recv(socket, buffer, sizeof(buffer), 0);
 
-        if (message == "exit") {
+        if (bytesRead == -1) {
+            std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
             break;
         }
 
-        ssize_t bytesSent = send(clientSocket, message.c_str(), message.size(), 0);
-        if (bytesSent == -1) {
-            std::cerr << "Error sending data: " << strerror(errno) << std::endl;
+        if (bytesRead <= 0) {
+            std::cerr << "Server disconnected." << std::endl;
             break;
+        }
+
+        std::cout << std::string(buffer, bytesRead) << std::endl;
+    }
+    }, clientSocket);
+
+    while (true) {
+        std::string message;
+        std::getline(std::cin, message);
+
+        if (message == "/exit") {
+            break;
+        } else if (message == "/count") {
+            ssize_t bytesSent = send(clientSocket, message.c_str(), message.size(), 0);
+            if (bytesSent == -1) {
+                std::cerr << "Error sending data: " << strerror(errno) << std::endl;
+                break;
+            }
+        } else {
+            // Отправить обычное сообщение
+            ssize_t bytesSent = send(clientSocket, message.c_str(), message.size(), 0);
+            if (bytesSent == -1) {
+                std::cerr << "Error sending data: " << strerror(errno) << std::endl;
+                break;
+            }
         }
     }
 
@@ -76,6 +91,5 @@ int main(int argc, char* argv[]) {
     std::cout << "Connection closed." << std::endl;
 
     receiver.join();
-
     return 0;
 }
