@@ -17,16 +17,46 @@ struct ClientConnection {
     std::string name;
 };
 
-std::vector<ClientConnection> clients;
-std::mutex mtx;
-int connectedClients = 0;
-std::mutex countMutex;
+class ClientManager {
+public:
+    ClientManager() : connectedClients(0) {}
 
-void handleClient(int clientSocket, const std::string& clientName) {
-    {
-        std::unique_lock<std::mutex> lock(countMutex);
+    void addClient(int socket, const struct sockaddr_in& clientAddr, const std::string& name) {
+        std::lock_guard<std::mutex> lock(mtx);
+        clients.push_back({socket, clientAddr, name});
         connectedClients++;
     }
+
+    void removeClient(int socket, const std::string& name) {
+        std::lock_guard<std::mutex> lock(mtx);
+        clients.erase(std::remove_if(clients.begin(), clients.end(), [socket](const ClientConnection& client) {
+            return client.socket == socket;
+        }), clients.end());
+        connectedClients--;
+        std::cout << "Client '" << name << "' disconnected" << std::endl;
+    }
+
+    int getConnectedClients() {
+        std::lock_guard<std::mutex> lock(countMutex);
+        return connectedClients;
+    }
+
+    std::vector<ClientConnection> getClients() {
+        std::lock_guard<std::mutex> lock(mtx);
+        return clients;
+    }
+
+private:
+    std::vector<ClientConnection> clients;
+    std::mutex mtx;
+    int connectedClients;
+    std::mutex countMutex;
+};
+
+ClientManager clientManager;
+
+void handleClient(int clientSocket, const std::string& clientName) {
+    clientManager.addClient(clientSocket, {}, clientName);
 
     char buffer[1024];
 
@@ -34,37 +64,23 @@ void handleClient(int clientSocket, const std::string& clientName) {
         int bytesRead = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (bytesRead <= 0) {
             close(clientSocket);
-            std::cout << "Клиент '" << clientName << "' отключился" << std::endl;
-
-            {
-                std::unique_lock<std::mutex> lock(countMutex);
-                connectedClients--;
-            }
-
-            std::unique_lock<std::mutex> lock(mtx);
-            clients.erase(std::remove_if(clients.begin(), clients.end(), [clientSocket](const ClientConnection& client) {
-                return client.socket == clientSocket;
-            }), clients.end());
+            clientManager.removeClient(clientSocket, clientName);
             break;
         }
 
         std::string message(buffer, bytesRead);
 
         if (message == "count") {
-            // Отправляем клиенту количество пользователей на сервере
-            std::unique_lock<std::mutex> lock(countMutex);
-            std::string countMessage = "Количество пользователей на сервере: " + std::to_string(connectedClients);
+            std::string countMessage = "Number of users on the server: " + std::to_string(clientManager.getConnectedClients());
             ssize_t sentBytes = send(clientSocket, countMessage.c_str(), countMessage.size(), 0);
         } else {
-            // Считаем количество различных символов в сообщении
             std::map<char, int> charCount;
             for (int i = 0; i < bytesRead; i++) {
                 char c = buffer[i];
                 charCount[c]++;
             }
 
-            // Строим ответное сообщение с таблицей
-            std::string countMessage = "Таблица количества символов:\n";
+            std::string countMessage = "Character count table:\n";
             for (const auto& entry : charCount) {
                 countMessage += entry.first;
                 countMessage += " ";
@@ -72,10 +88,9 @@ void handleClient(int clientSocket, const std::string& clientName) {
                 countMessage += "\n";
             }
 
-            // Отправляем ответ клиенту
             ssize_t sentBytes = send(clientSocket, countMessage.c_str(), countMessage.size(), 0);
-            std::unique_lock<std::mutex> lock(mtx);
-            for (const auto& client : clients) {
+
+            for (const auto& client : clientManager.getClients()) {
                 if (client.socket != clientSocket) {
                     ssize_t sentBytes = send(client.socket, (clientName + ": " + message).c_str(), bytesRead + clientName.size() + 2, 0);
                 }
@@ -86,7 +101,7 @@ void handleClient(int clientSocket, const std::string& clientName) {
 
 int main(int argc, char** argv) {
     if (argc != 2) {
-        std::cerr << "Использование: " << argv[0] << " <порт>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <port>" << std::endl;
         return 1;
     }
 
@@ -97,7 +112,7 @@ int main(int argc, char** argv) {
 
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket < 0) {
-        std::cerr << "Ошибка создания серверного сокета" << std::endl;
+        std::cerr << "Error creating server socket" << std::endl;
         return 1;
     }
 
@@ -106,30 +121,30 @@ int main(int argc, char** argv) {
     serverAddr.sin_port = htons(serverPort);
 
     if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-        std::cerr << "Ошибка привязки серверного сокета" << std::endl;
+        std::cerr << "Error binding server socket" << std::endl;
         close(serverSocket);
         return 1;
     }
 
     if (listen(serverSocket, 5) < 0) {
-        std::cerr << "Ошибка при прослушивании порта " << serverPort << std::endl;
+        std::cerr << "Error listening on port " << serverPort << std::endl;
         close(serverSocket);
         return 1;
     }
 
-    std::cout << "Сервер слушает порт " << serverPort << std::endl;
+    std::cout << "Server is listening on port " << serverPort << std::endl;
 
     while (true) {
         clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
         if (clientSocket < 0) {
-            std::cerr << "Ошибка при приеме соединения с клиентом" << std::endl;
+            std::cerr << "Error accepting a connection from a client" << std::endl;
             continue;
         }
 
         char nameBuffer[1024];
         int nameBytesRead = recv(clientSocket, nameBuffer, sizeof(nameBuffer), 0);
         if (nameBytesRead <= 0) {
-            std::cerr << "Клиент не отправил имя" << std::endl;
+            std::cerr << "Client did not send a name" << std::endl;
             close(clientSocket);
             continue;
         }
@@ -137,13 +152,10 @@ int main(int argc, char** argv) {
         nameBuffer[nameBytesRead] = '\0';
         std::string clientName(nameBuffer);
 
-        std::cout << "Клиент '" << clientName << "' подключился" << std::endl;
+        std::cout << "Client '" << clientName << "' connected" << std::endl;
 
         std::thread clientThread(handleClient, clientSocket, clientName);
         clientThread.detach();
-
-        std::unique_lock<std::mutex> lock(mtx);
-        clients.push_back({clientSocket, clientAddr, clientName});
     }
 
     close(serverSocket);

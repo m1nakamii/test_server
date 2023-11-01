@@ -7,6 +7,25 @@
 #include <cerrno>
 #include <thread>
 
+void receiveMessages(int clientSocket) {
+    while (true) {
+        char buffer[1024];
+        ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer), 0);
+
+        if (bytesRead == -1) {
+            std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
+            break;
+        }
+
+        if (bytesRead <= 0) {
+            std::cerr << "Server disconnected." << std::endl;
+            break;
+        }
+
+        std::cout << std::string(buffer, bytesRead) << std::endl;
+    }
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 3) {
         std::cerr << "Usage: " << argv[0] << " <server_ip> <server_port>" << std::endl;
@@ -46,24 +65,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::thread receiver([](int socket) {
-    while (true) {
-        char buffer[1024];
-        ssize_t bytesRead = recv(socket, buffer, sizeof(buffer), 0);
-
-        if (bytesRead == -1) {
-            std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
-            break;
-        }
-
-        if (bytesRead <= 0) {
-            std::cerr << "Server disconnected." << std::endl;
-            break;
-        }
-
-        std::cout << std::string(buffer, bytesRead) << std::endl;
-    }
-    }, clientSocket);
+    std::thread receiver(receiveMessages, clientSocket);
 
     while (true) {
         std::string message;
@@ -78,7 +80,6 @@ int main(int argc, char* argv[]) {
                 break;
             }
         } else {
-            // Отправить обычное сообщение
             ssize_t bytesSent = send(clientSocket, message.c_str(), message.size(), 0);
             if (bytesSent == -1) {
                 std::cerr << "Error sending data: " << strerror(errno) << std::endl;
